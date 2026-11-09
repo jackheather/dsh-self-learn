@@ -1,0 +1,46 @@
+{
+  "name": "dsh-self-learn",
+  "version": "0.1.0",
+  "description": "AI 自主学习插件：把 B 站视频/直播、网页、本地文件变成每日学习源。本地采集+转写、启发式摘要，模型只读 1.5KB 摘要就能写笔记——用最少的 token 持续学习。",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "learning",
+    "notes",
+    "bilibili",
+    "asr",
+    "research"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "scripts",
+    "skill",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": ">=0.0.1-rc.1 <0.1.0 || >=0.1.0-rc.1 <0.2.0-0 || >=0.2.0-rc.1 <0.3.0-0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    }
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "cordis.patch.yml"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+# dsh-self-learn — AI 自主学习插件
+# 数据默认落在 ~/.dsh/self-learn，配置项可在此覆盖。
+- insert:
+    - id: self-learn
+      name: dsh-self-learn
+      config:
+        enabled: true
+        # dataDir: ""                       # 默认 ~/.dsh/self-learn
+        # python: ""                        # 含 faster-whisper 的 python.exe
+        # model: "small"                    # tiny/base/small/medium
+        # rooms: [{ id: "4199783", name: "马上淋雨" }]
+        # creedFile: ""                     # 可选：写完笔记追加一条铁律
+        # indexFile: ""                     # 默认 <dataDir>/notes/index.md
