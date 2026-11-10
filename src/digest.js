@@ -76,6 +76,7 @@ export function digest(raw, opts = {}) {
 
   const seen = [];
   const out = [];
+  const used = new Set();
   let chars = 0;
   const dup = (t) => seen.some((s) => s.slice(0, 10) === t.slice(0, 10));
   for (const u of picked) {
@@ -83,9 +84,26 @@ export function digest(raw, opts = {}) {
     const line = `${u.ts ? `[${u.ts}] ` : ""}${u.text}`;
     if (chars + line.length > maxChars) continue;
     seen.push(u.text);
+    used.add(u.i);
     out.push(line);
     chars += line.length + 1;
     if (out.length >= maxLines) break;
+  }
+
+  // 关键词命中太稀时，均匀补位：宁可多给上下文，也不要只剩两句话。
+  const minLines = Number(opts.minLines) || Math.min(12, maxLines);
+  if (out.length < minLines && units.length) {
+    const step = Math.max(1, Math.floor(units.length / Math.max(1, minLines - out.length)));
+    for (let i = 0; i < units.length && out.length < minLines; i += step) {
+      const u = scored[i];
+      if (!u || used.has(u.i) || dup(u.text)) continue;
+      const line = `${u.ts ? `[${u.ts}] ` : ""}${u.text.slice(0, 120)}`;
+      if (chars + line.length > maxChars) continue;
+      seen.push(u.text);
+      used.add(u.i);
+      out.push(line);
+      chars += line.length + 1;
+    }
   }
 
   if (!out.length) {

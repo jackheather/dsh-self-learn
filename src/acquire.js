@@ -59,6 +59,37 @@ function pickAudio(data) {
   return audios.slice().sort((a, b) => (b.bandwidth || 0) - (a.bandwidth || 0))[0];
 }
 
+function pickVideo(data) {
+  const videos = data?.dash?.video || [];
+  if (!videos.length) return null;
+  return videos.slice().sort((a, b) => (b.bandwidth || 0) - (a.bandwidth || 0))[0];
+}
+
+/** 抽关键帧 + 本地 OCR；失败不阻断主流程（转写才是主产物）。 */
+async function extractFrames(cfg, videoUrl, duration, outDir, log) {
+  const f = cfg.frames || {};
+  if (!f.enabled) return null;
+  const r = await run(process.execPath, [
+    path.join(HERE, "..", "scripts", "frames.mjs"),
+    "--video",
+    videoUrl,
+    "--out",
+    outDir,
+    "--duration",
+    String(duration || 0),
+    "--every",
+    String(f.everySec || 90),
+    "--max",
+    String(f.max || 40),
+  ]);
+  if (log) log(r.out, r.err);
+  try {
+    return JSON.parse(String(r.out).trim().split("\n").pop());
+  } catch {
+    return { frames: 0, error: String(r.err || r.out).slice(-200) };
+  }
+}
+
 async function asr(cfg, flac, outTxt, log) {
   const py = cfg.python || "python";
   const script = path.join(HERE, "..", "scripts", "asr.py");
@@ -106,14 +137,26 @@ async function acquireBili(cfg, input, log) {
   await asr(cfg, tmpFlac, outTxt, log);
   fs.rmSync(tmpFlac, { force: true });
   const text = fs.readFileSync(outTxt, "utf8");
+
+  // 画面：视频流直接按时间点抓帧（不下载整段视频），再本地 OCR。
+  let framesInfo = null;
+  let framesDir = "";
+  const video = pickVideo(play.data);
+  if (video && info.duration) {
+    framesDir = path.join(cfg.framesDir, bv);
+    framesInfo = await extractFrames(cfg, video.baseUrl, info.duration, framesDir, log);
+  }
+
   return {
     id: "bili:" + bv,
     type: "bili",
     ref: `https://www.bilibili.com/video/${bv}`,
     title: info.title || bv,
     transcriptPath: outTxt,
+    framesDir: framesInfo?.frames ? framesDir : "",
+    frames: framesInfo?.frames || 0,
     chars: text.length,
-    extra: { bv, author: info.owner?.name, duration: info.duration },
+    extra: { bv, author: info.owner?.name, duration: info.duration, frames: framesInfo?.frames || 0 },
   };
 }
 

@@ -64,6 +64,42 @@ function statusLine(entry) {
   return `${entry.id} ｜ ${label} ｜ ${entry.title || entry.ref}${entry.chars ? ` ｜ ${entry.chars} 字` : ""}`;
 }
 
+const mmss = (s) => {
+  const n = Math.max(0, Math.round(Number(s) || 0));
+  return `${String(Math.floor(n / 60)).padStart(2, "0")}:${String(n % 60).padStart(2, "0")}`;
+};
+
+function loadFrames(entry) {
+  if (!entry?.framesDir) return null;
+  const file = path.join(entry.framesDir, "frames.json");
+  if (!fs.existsSync(file)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8").replace(/^\uFEFF/, ""));
+  } catch {
+    return null;
+  }
+}
+
+/** 把各帧 OCR 文字合成一段（去重、限量），给摘要用。 */
+function screenText(frames, maxChars = 700) {
+  const seen = new Set();
+  const lines = [];
+  let chars = 0;
+  for (const f of frames || []) {
+    for (const raw of String(f.text || "").split("\n")) {
+      const t = raw.trim();
+      if (t.length < 3) continue;
+      const key = t.slice(0, 12);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (chars + t.length > maxChars) return lines;
+      lines.push(`[${mmss(f.t)}] ${t}`);
+      chars += t.length + 1;
+    }
+  }
+  return lines;
+}
+
 export function apply(ctx, rawConfig = {}) {
   const cfg = ensureLayout(resolveConfig(rawConfig));
   log("data:", cfg.dataDir);
@@ -171,14 +207,51 @@ export function apply(ctx, rawConfig = {}) {
               entry.digestPath = digestPath;
               entry.digestStats = d.stats;
               saveRegistry(cfg, reg);
+              const frames = loadFrames(entry);
+              const screen = screenText(frames, 700);
               return [
                 `# ${entry.title || entry.id}`,
                 `来源：${entry.ref}`,
                 `摘要：${d.stats.picked}/${d.stats.units} 句 · ${d.stats.chars} 字（原文 ${raw.length} 字，省约 ${Math.max(0, Math.round((1 - d.stats.chars / Math.max(1, raw.length)) * 100))}%）`,
                 "",
                 d.text,
+                ...(screen.length ? ["", `## 画面文字（本地 OCR，${frames.length} 帧里挑出的）`, ...screen, `→ 要看具体画面：learn_frames source=${entry.id}`] : []),
                 "",
                 `→ 写笔记：learn_note source=${entry.id} title=… oneLine=… mechanisms=[…] actions=[…] quotes=[…] doubts=[…]`,
+              ].join("\n");
+            },
+          }),
+        ),
+      );
+
+      // ------------------------------------------------------------ learn_frames
+      disposers.push(
+        sctx.tools.register(
+          tool({
+            name: "learn_frames",
+            description:
+              "AI 自主学习：看某个视频/直播的「画面清单」——关键帧时间点、图片路径、本地 OCR 文字（0 token）。需要真正看图时再 read 对应 jpg；只读文字时直接看这里，别读图片。",
+            parameters: {
+              source: S("来源 id（bili:BV1xxxx）、BV号或路径"),
+              max: N("最多列几帧，默认 12"),
+            },
+            async execute(args) {
+              const reg = loadRegistry(cfg);
+              const entry = findEntry(reg, args.source);
+              if (!entry) return `没找到来源：${args.source}`;
+              const frames = loadFrames(entry);
+              if (!frames || !frames.length) return `这个来源没有画面（${entry.id}）。视频/直播才会抽帧；重新 learn_add 会补。`;
+              const list = frames.slice(0, Math.max(1, Number(args.max) || 12));
+              const lines = list.map((f) => {
+                const txt = String(f.text || "").replace(/\n/g, " / ").slice(0, 80);
+                return `[${mmss(f.t)}] ${f.file}${txt ? ` ｜ ${txt}` : ""}`;
+              });
+              return [
+                `# 画面清单：${entry.title || entry.id}（${frames.length} 帧）`,
+                ...lines,
+                "",
+                `图片目录：${entry.framesDir}`,
+                `→ 需要看画面时 read ${entry.framesDir}\\<文件名>；OCR 已给出屏幕文字，优先不读图（省 token）。`,
               ].join("\n");
             },
           }),

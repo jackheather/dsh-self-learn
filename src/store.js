@@ -19,14 +19,18 @@ export const DEFAULT_CONFIG = {
   maxWebChars: 400000,
   maxFileBytes: 400000,
   maxDirFiles: 40,
+  /** 画面：抽帧 + Windows 自带 OCR（0 token）。everySec 越小越密、磁盘越多 */
+  frames: { enabled: true, everySec: 90, max: 40 },
 };
 
 export function resolveConfig(raw = {}) {
   const cfg = { ...DEFAULT_CONFIG, ...(raw && typeof raw === "object" ? raw : {}) };
   cfg.dataDir = cfg.dataDir ? path.resolve(cfg.dataDir) : path.join(os.homedir(), ".dsh", "self-learn");
+  cfg.frames = { ...DEFAULT_CONFIG.frames, ...(raw && typeof raw.frames === "object" && raw.frames ? raw.frames : {}) };
   cfg.notesDir = path.join(cfg.dataDir, "notes");
   cfg.transcriptDir = path.join(cfg.dataDir, "transcripts");
   cfg.liveDir = path.join(cfg.dataDir, "live");
+  cfg.framesDir = path.join(cfg.dataDir, "frames");
   cfg.modelsDir = path.join(cfg.dataDir, "models");
   cfg.tmpDir = path.join(cfg.dataDir, "tmp");
   cfg.stateFile = path.join(cfg.dataDir, "state.json");
@@ -38,7 +42,7 @@ export function resolveConfig(raw = {}) {
 }
 
 export function ensureLayout(cfg) {
-  for (const dir of [cfg.dataDir, cfg.notesDir, cfg.transcriptDir, cfg.liveDir, cfg.modelsDir, cfg.tmpDir]) {
+  for (const dir of [cfg.dataDir, cfg.notesDir, cfg.transcriptDir, cfg.liveDir, cfg.framesDir, cfg.modelsDir, cfg.tmpDir]) {
     fs.mkdirSync(dir, { recursive: true });
   }
   if (!fs.existsSync(cfg.configFile)) {

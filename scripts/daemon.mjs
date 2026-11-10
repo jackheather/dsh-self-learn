@@ -196,7 +196,36 @@ async function roomLoop(room) {
     r.current = path.basename(flac);
     save();
     logLine(`room ${roomId} recording ${path.basename(flac)}`);
+    // 录制期间定时抓一帧 + 本地 OCR（0 token），整段结束就有「画面清单」。
+    const framesOn = cfg.frames?.enabled !== false;
+    const every = Math.max(60, Number(cfg.frames?.everySec) || 90) * 1000;
+    const framesDir = path.join(cfg.framesDir, path.basename(flac).replace(/\.flac$/, ""));
+    const startedAt = Date.now();
+    let snapChild = null;
+    let snapTimer = null;
+    if (framesOn) {
+      snapTimer = setInterval(() => {
+        if (snapChild || !running) return;
+        const at = Math.round((Date.now() - startedAt) / 1000);
+        try {
+          snapChild = spawn(
+            process.execPath,
+            [path.join(HERE, "frames.mjs"), "--video", info.stream, "--out", framesDir, "--snapshot", "--at", String(at), "--max", "1"],
+            { stdio: "ignore", windowsHide: true },
+          );
+          snapChild.on("close", () => {
+            snapChild = null;
+          });
+          snapChild.on("error", () => {
+            snapChild = null;
+          });
+        } catch {
+          snapChild = null;
+        }
+      }, every);
+    }
     await ffmpegRecord(info.stream, flac, cfg.segmentSecs);
+    if (snapTimer) clearInterval(snapTimer);
     const size = fs.existsSync(flac) ? fs.statSync(flac).size : 0;
     r.current = "";
     save();
