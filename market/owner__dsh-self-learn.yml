@@ -1,9 +1,0 @@
-# 市场条目模板 → 复制到 awesome-dsh-plugin 的 data/plugins/<owner>__dsh-self-learn.yml
-# 把两处 <owner> 换成你的 GitHub 用户名；其余不用改。
-
-url: https://github.com/<owner>/dsh-self-learn
-name: <owner>/dsh-self-learn
-category: tools
-description:
-  en: Turns Bilibili videos and live streams, web pages and local files into a daily learning loop - local ffmpeg and faster-whisper transcription, zero-token heuristic digests of about 1.5 KB, five-section notes with an index, and a resident live recorder.
-  zh: 把 B 站视频与直播、网页、本地文件变成每日学习闭环：本地 ffmpeg + faster-whisper 转写，启发式摘要约 1.5KB，五段式笔记与索引，外加常驻直播录制。

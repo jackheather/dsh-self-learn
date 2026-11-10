@@ -1,0 +1,6 @@
+name: dsh-self-learn
+url: https://github.com/jackheather/dsh-self-learn
+category: tools
+description:
+  en: "Learn from Bilibili videos, web pages, local files and live streams: auto ASR + OCR + digest, returning only ~1.5KB summaries and saving 90%+ tokens."
+  zh: "从 B 站视频、网页、本地文件、直播里学习：自动转写 + 画面 OCR + 摘要，每次只回约 1.5KB，省 90% 以上 token。"
