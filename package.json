@@ -45,5 +45,14 @@
     "bundle": {
       "patch": "cordis.patch.yml"
     }
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jackheather/dsh-self-learn.git"
+  },
+  "homepage": "https://github.com/jackheather/dsh-self-learn#readme",
+  "bugs": {
+    "url": "https://github.com/jackheather/dsh-self-learn/issues"
+  },
+  "author": "jackheather"
 }
