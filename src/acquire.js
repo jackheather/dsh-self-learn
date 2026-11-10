@@ -21,6 +21,12 @@ function run(cmd, args, opts = {}) {
   });
 }
 
+async function probeSeconds(file) {
+  const r = await run("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", file]);
+  const n = parseFloat(String(r.out).trim());
+  return Number.isFinite(n) ? n : 0;
+}
+
 async function jsonFetch(url, cfg) {
   const headers = {
     "user-agent": UA,
@@ -93,11 +99,63 @@ async function extractFrames(cfg, videoUrl, duration, outDir, log) {
 async function asr(cfg, flac, outTxt, log) {
   const py = cfg.python || "python";
   const script = path.join(HERE, "..", "scripts", "asr.py");
-  const r = await run(py, [script, flac, outTxt, "--model", cfg.model, "--models", cfg.modelsDir], {
+  // out 传 "-"：转写正文走 stdout，由 node 落盘。原因：python 子进程在某些机器上
+  // 拿不到用户目录的写权限（沙箱令牌），而 node 可以。
+  const r = await run(py, [script, flac, "-", "--model", cfg.model, "--models", cfg.modelsDir], {
     env: { ...process.env, HF_ENDPOINT: "https://hf-mirror.com", PYTHONIOENCODING: "utf-8" },
   });
   if (log) log(r.out, r.err);
   if (r.code !== 0) throw new Error(`ASR 失败（${py}）：${(r.err || r.out).slice(-400)}`);
+  if (!r.out.trim()) throw new Error(`ASR 没吐字：${(r.err || "").slice(-300)}`);
+  fs.writeFileSync(outTxt, r.out.endsWith("\n") ? r.out : r.out + "\n", "utf8");
+}
+
+async function downloadAudio(cfg, bv, cid, durSecs, tmpFlac, log) {
+  const play = await jsonFetch(
+    `https://api.bilibili.com/x/player/playurl?bvid=${bv}&cid=${cid}&qn=64&fnval=16&fourk=1`,
+    cfg,
+  );
+  if (play.code !== 0) throw new Error(`playurl 接口 ${play.code} ${play.message || ""}（可能需要 cookie）`);
+  const audio = pickAudio(play.data);
+  if (!audio) throw new Error("没有可用的音频流（可能是付费/充电视频）");
+  const r = await run("ffmpeg", [
+    "-y",
+    "-reconnect", "1",
+    "-reconnect_streamed", "1",
+    "-reconnect_delay_max", "5",
+    "-headers", `Referer: https://www.bilibili.com/\r\nUser-Agent: ${UA}\r\n`,
+    "-i", audio.baseUrl,
+    "-vn", "-t", String(Math.max(1, durSecs)),
+    "-ac", "1", "-ar", "16000", "-c:a", "flac",
+    tmpFlac,
+  ]);
+  if (log) log(r.out, r.err);
+  if (r.code !== 0 || !fs.existsSync(tmpFlac)) throw new Error("下载音频失败（ffmpeg 未安装或流地址过期）");
+  let dur = await probeSeconds(tmpFlac);
+  if (dur >= durSecs * 0.85) return { play, dur };
+
+  // 少数稿件 dash 音频只吐出几十秒，退回 fnval=1 的整段 durl 再抽音轨。
+  fs.rmSync(tmpFlac, { force: true });
+  const d = await jsonFetch(
+    `https://api.bilibili.com/x/player/playurl?bvid=${bv}&cid=${cid}&qn=64&fnval=1&fnver=0&fourk=1`,
+    cfg,
+  );
+  const whole = d?.data?.durl?.[0]?.url;
+  if (!whole) throw new Error(`音频流只有 ${Math.round(dur)}s，durl 也拿不到整段`);
+  const r2 = await run("ffmpeg", [
+    "-y",
+    "-reconnect", "1",
+    "-reconnect_streamed", "1",
+    "-headers", `Referer: https://www.bilibili.com/\r\nUser-Agent: ${UA}\r\n`,
+    "-i", whole,
+    "-vn", "-ac", "1", "-ar", "16000", "-c:a", "flac",
+    tmpFlac,
+  ]);
+  if (log) log(r2.out, r2.err);
+  if (r2.code !== 0 || !fs.existsSync(tmpFlac)) throw new Error("durl 回退下载也失败了");
+  dur = await probeSeconds(tmpFlac);
+  if (dur < durSecs * 0.85) throw new Error(`整段只有 ${Math.round(dur)}s（应为 ${durSecs}s），放弃`);
+  return { play, dur };
 }
 
 async function acquireBili(cfg, input, log) {
@@ -106,45 +164,38 @@ async function acquireBili(cfg, input, log) {
   const view = await jsonFetch(`https://api.bilibili.com/x/web-interface/view?bvid=${bv}`, cfg);
   if (view.code !== 0) throw new Error(`view 接口 ${view.code} ${view.message || ""}`);
   const info = view.data;
-  const cid = info.pages?.[0]?.cid;
-  if (!cid) throw new Error("拿不到 cid");
-  const play = await jsonFetch(
-    `https://api.bilibili.com/x/player/playurl?bvid=${bv}&cid=${cid}&qn=64&fnval=16&fourk=1`,
-    cfg,
-  );
-  if (play.code !== 0) throw new Error(`playurl 接口 ${play.code} ${play.message || ""}（可能需要 cookie）`);
-  const audio = pickAudio(play.data);
-  if (!audio) throw new Error("没有可用的音频流（可能是付费/充电视频）");
+  // 分P：必须逐 P 转录，否则只会学到第一段（之前误判成"音频截断"）。
+  const pages = info.pages?.length
+    ? info.pages
+    : [{ cid: info.cid, page: 1, part: "", duration: info.duration }];
   const tmpFlac = path.join(cfg.tmpDir, `${bv}.flac`);
-  const r = await run("ffmpeg", [
-    "-y",
-    "-headers",
-    `Referer: https://www.bilibili.com/\r\nUser-Agent: ${UA}\r\n`,
-    "-i",
-    audio.baseUrl,
-    "-vn",
-    "-ac",
-    "1",
-    "-ar",
-    "16000",
-    "-c:a",
-    "flac",
-    tmpFlac,
-  ]);
-  if (log) log(r.out, r.err);
-  if (r.code !== 0 || !fs.existsSync(tmpFlac)) throw new Error("下载音频失败（ffmpeg 未安装或流地址过期）");
   const outTxt = path.join(cfg.transcriptDir, `${bv}.txt`);
-  await asr(cfg, tmpFlac, outTxt, log);
-  fs.rmSync(tmpFlac, { force: true });
-  const text = fs.readFileSync(outTxt, "utf8");
+  const chunks = [];
+  let firstPlay = null;
 
-  // 画面：视频流直接按时间点抓帧（不下载整段视频），再本地 OCR。
+  for (const pg of pages) {
+    const pgDur = Number(pg.duration) || Number(info.duration) || 60;
+    const { play } = await downloadAudio(cfg, bv, pg.cid, pgDur, tmpFlac, log);
+    if (!firstPlay) firstPlay = play;
+    const partTxt = path.join(cfg.tmpDir, `${bv}-p${pg.page}.txt`);
+    await asr(cfg, tmpFlac, partTxt, log);
+    fs.rmSync(tmpFlac, { force: true });
+    const t = fs.existsSync(partTxt) ? fs.readFileSync(partTxt, "utf8") : "";
+    fs.rmSync(partTxt, { force: true });
+    if (!t.trim()) throw new Error(`P${pg.page} 转写结果为空`);
+    chunks.push(pages.length > 1 ? `## P${pg.page} ${pg.part || ""}\n\n${t.trim()}` : t.trim());
+    if (log) log(`P${pg.page}/${pages.length} 完成（${t.length} 字）`);
+  }
+  const text = chunks.join("\n\n");
+  fs.writeFileSync(outTxt, text, "utf8");
+
+  // 画面：只抓第一 P（视频流按时间点抓帧，不下载整段视频），再本地 OCR。
   let framesInfo = null;
   let framesDir = "";
-  const video = pickVideo(play.data);
-  if (video && info.duration) {
+  const video = firstPlay ? pickVideo(firstPlay.data) : null;
+  if (video && pages[0]?.duration) {
     framesDir = path.join(cfg.framesDir, bv);
-    framesInfo = await extractFrames(cfg, video.baseUrl, info.duration, framesDir, log);
+    framesInfo = await extractFrames(cfg, video.baseUrl, Number(pages[0].duration), framesDir, log);
   }
 
   return {
@@ -156,7 +207,13 @@ async function acquireBili(cfg, input, log) {
     framesDir: framesInfo?.frames ? framesDir : "",
     frames: framesInfo?.frames || 0,
     chars: text.length,
-    extra: { bv, author: info.owner?.name, duration: info.duration, frames: framesInfo?.frames || 0 },
+    extra: {
+      bv,
+      author: info.owner?.name,
+      duration: info.duration,
+      pages: pages.length,
+      frames: framesInfo?.frames || 0,
+    },
   };
 }
 

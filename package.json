@@ -1,6 +1,6 @@
 {
   "name": "dsh-self-learn",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "AI 自主学习插件：把 B 站视频/直播、网页、本地文件变成每日学习源。本地采集+转写+抽帧 OCR（0 token），模型只读 1.5KB 摘要就能写笔记。",
   "keywords": [
     "deepseek-harness",

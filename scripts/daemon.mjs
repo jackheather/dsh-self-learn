@@ -116,22 +116,39 @@ function ffmpegRecord(stream, out, secs) {
 function transcribe(item) {
   return new Promise((resolve) => {
     const py = conf.python || "python";
+    // "-" = 正文走 stdout，由 node 写文件（python 子进程可能写不了用户目录）。
     const child = spawn(
       py,
-      [path.join(HERE, "asr.py"), item.flac, item.out, "--model", cfg.model, "--models", cfg.modelsDir],
+      [path.join(HERE, "asr.py"), item.flac, "-", "--model", cfg.model, "--models", cfg.modelsDir],
       {
-        stdio: "ignore",
+        stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
         env: { ...process.env, HF_ENDPOINT: "https://hf-mirror.com", PYTHONIOENCODING: "utf-8" },
       },
     );
+    let out = "";
+    let err = "";
+    child.stdout.on("data", (d) => (out += d.toString()));
+    child.stderr.on("data", (d) => (err += d.toString()));
     children.add(child);
     child.on("close", (code) => {
       children.delete(child);
+      if (code === 0 && out.trim()) {
+        try {
+          fs.writeFileSync(item.out, out.endsWith("\n") ? out : out + "\n", "utf8");
+        } catch (e) {
+          logLine(`write ${item.out} error: ${e?.message || e}`);
+          return resolve(1);
+        }
+      } else if (code === 0) {
+        logLine(`asr empty ${item.flac}: ${err.slice(-200)}`);
+        return resolve(1);
+      }
       resolve(code);
     });
-    child.on("error", () => {
+    child.on("error", (e) => {
       children.delete(child);
+      logLine(`asr spawn error: ${e?.message || e}`);
       resolve(-1);
     });
   });

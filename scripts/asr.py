@@ -33,9 +33,18 @@ def main():
     for s in segs:
         t = int(s.start)
         lines.append(f"[{t // 60:02d}:{t % 60:02d}] {s.text.strip()}")
-    with open(args.out, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
-    print(f"OK {len(lines)} segments -> {args.out}")
+    text = "\n".join(lines) + "\n"
+    # out = "-" 时走 stdout：某些机器上 python 子进程写不了用户目录（沙箱令牌），
+    # 让 node 落盘更稳；进度信息一律走 stderr，别污染 stdout。
+    if args.out == "-":
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stdout.write(text)
+        sys.stdout.flush()
+        print(f"OK {len(lines)} segments -> stdout", file=sys.stderr)
+    else:
+        with open(args.out, "w", encoding="utf-8") as f:
+            f.write(text)
+        print(f"OK {len(lines)} segments -> {args.out}", file=sys.stderr)
 
 
 if __name__ == "__main__":
